@@ -47,7 +47,7 @@ export const useInvestigation = () => {
     services: { http, notifications, paragraphService },
   } = useOpenSearchDashboards<NoteBookServices>();
   const { updateHypotheses, updateNotebookContext } = useNotebook();
-  const { createParagraph, runParagraph, deleteParagraphsByIds } = useContext(
+  const { createParagraph, createBatchParagraphs, runParagraph, deleteParagraphsByIds } = useContext(
     NotebookReactContext
   ).paragraphHooks;
   const contextStateValue = useObservable(context.state.getValue$());
@@ -62,16 +62,12 @@ export const useInvestigation = () => {
   const storeInvestigationResponse = useCallback(
     async ({ payload }: { payload: PERAgentInvestigationResponse }) => {
       const findingId2ParagraphId: { [key: string]: string } = {};
-      let startParagraphIndex = paragraphLengthRef.current;
+      const startParagraphIndex = paragraphLengthRef.current;
       const sortedFindings = payload.findings.slice().sort((a, b) => b.importance - a.importance);
-      for (let i = 0; i < sortedFindings.length; i++) {
-        const finding = sortedFindings[i];
-        let paragraph;
-        try {
-          paragraph = await createParagraph({
-            index: startParagraphIndex,
-            input: {
-              inputText: `%md
+      
+      const paragraphsToCreate = sortedFindings.map(finding => ({
+        input: {
+          inputText: `%md
 Importance: ${finding.importance}
 
 Description:
@@ -80,26 +76,27 @@ ${finding.description}
 Evidence:
 ${finding.evidence}
 
-              `.trim(),
-              inputType: 'MARKDOWN',
-            },
-            aiGenerated: true,
+          `.trim(),
+          inputType: 'MARKDOWN' as const,
+        },
+        aiGenerated: true,
+      }));
+      
+      try {
+        const batchResult = await createBatchParagraphs({
+          startIndex: startParagraphIndex,
+          paragraphs: paragraphsToCreate,
+          runAfterCreation: true,
+        });
+        
+        if (batchResult?.paragraphs) {
+          batchResult.paragraphs.forEach((paragraph: any, index: number) => {
+            findingId2ParagraphId[sortedFindings[index].id] = paragraph.id;
           });
-          startParagraphIndex++;
-        } catch (e) {
-          console.error('Failed to create paragraph for finding:', JSON.stringify(finding));
-          continue;
         }
-        if (paragraph) {
-          findingId2ParagraphId[finding.id] = paragraph.value.id;
-          try {
-            await runParagraph({
-              id: paragraph.value.id,
-            });
-          } catch (e) {
-            console.error('Failed to run paragraph:', e);
-          }
-        }
+      } catch (e) {
+        console.error('Failed to create batch paragraphs:', e);
+        return;
       }
       const newHypotheses = payload.hypotheses
         .map((hypothesis) => ({
@@ -122,7 +119,7 @@ ${finding.evidence}
         console.error('Failed to update investigation result', e);
       }
     },
-    [updateHypotheses, createParagraph, runParagraph]
+    [updateHypotheses, createBatchParagraphs]
   );
 
   /**

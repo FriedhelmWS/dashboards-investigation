@@ -115,6 +115,67 @@ export async function createParagraphs<TOutput>(
   return newParagraph;
 }
 
+export async function createBatchParagraphs<TOutput>(
+  params: {
+    noteId: string;
+    startIndex: number;
+    paragraphs: Array<{
+      input: ParagraphBackendType<TOutput>['input'];
+      dataSourceMDSId?: string;
+      aiGenerated?: boolean;
+    }>;
+    runAfterCreation?: boolean;
+  },
+  opensearchNotebooksClient: SavedObjectsClientContract,
+  context?: RequestHandlerContext,
+  request?: OpenSearchDashboardsRequest
+) {
+  const notebookInfo = await fetchNotebook(params.noteId, opensearchNotebooksClient);
+  const paragraphs = [...notebookInfo.attributes.savedNotebook.paragraphs];
+
+  const newParagraphs = params.paragraphs.map((p) => createParagraph(p));
+  paragraphs.splice(params.startIndex, 0, ...newParagraphs);
+
+  const updateNotebook = {
+    paragraphs,
+    dateModified: new Date().toISOString(),
+  };
+
+  await opensearchNotebooksClient.update(NOTEBOOK_SAVED_OBJECT, params.noteId, {
+    savedNotebook: updateNotebook,
+  });
+
+  if (params.runAfterCreation && context && request) {
+    let currentNotebook = await fetchNotebook(params.noteId, opensearchNotebooksClient);
+    let currentParagraphs = [...currentNotebook.attributes.savedNotebook.paragraphs];
+    
+    for (const paragraph of newParagraphs) {
+      try {
+        const updatedParagraphs = await runParagraph(
+          currentParagraphs,
+          paragraph.id,
+          context,
+          currentNotebook,
+          request
+        );
+        currentParagraphs = updatedParagraphs;
+      } catch (e) {
+        console.error('Failed to run paragraph:', paragraph.id, e);
+      }
+    }
+    
+    // Single final update with all executed paragraphs
+    await opensearchNotebooksClient.update(NOTEBOOK_SAVED_OBJECT, params.noteId, {
+      savedNotebook: {
+        paragraphs: currentParagraphs,
+        dateModified: new Date().toISOString(),
+      },
+    });
+  }
+
+  return { paragraphs: newParagraphs };
+}
+
 export async function deleteParagraphs(
   params: { noteId: string; paragraphId: string | undefined },
   opensearchNotebooksClient: SavedObjectsClientContract

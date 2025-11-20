@@ -190,8 +190,45 @@ export const useParagraphs = (context: { state: NotebookState }) => {
     [context.state]
   );
 
+  const createBatchParagraphs = useCallback(
+    (props: {
+      startIndex: number;
+      paragraphs: Array<{
+        input: ParagraphBackendType<unknown>['input'];
+        dataSourceMDSId?: string;
+        aiGenerated?: boolean;
+      }>;
+      runAfterCreation?: boolean;
+    }) => {
+      return http
+        .post(`${NOTEBOOKS_API_PREFIX}/savedNotebook/paragraphs/batch`, {
+          body: JSON.stringify({
+            noteId: context.state.value.id,
+            ...props,
+          }),
+        })
+        .then((res) => {
+          const newParagraphs = [...context.state.value.paragraphs];
+          const createdParagraphs = res.paragraphs.map((p: any) => new ParagraphState(p));
+          newParagraphs.splice(props.startIndex, 0, ...createdParagraphs);
+          context.state.updateValue({
+            paragraphs: newParagraphs,
+          });
+          return res;
+        })
+        .catch((err) => {
+          notifications.toasts.addDanger(
+            'Error adding paragraphs, please make sure you have the correct permission.'
+          );
+          console.error(err);
+        });
+    },
+    [context, notifications.toasts, http]
+  );
+
   const payload = {
     createParagraph,
+    createBatchParagraphs,
     deleteParagraph: (index: number) => {
       if (index < 0) {
         return Promise.reject('Please provide a valid paragraph index');

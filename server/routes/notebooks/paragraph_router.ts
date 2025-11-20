@@ -15,6 +15,7 @@ import { NOTEBOOKS_API_PREFIX } from '../../../common/constants/notebooks';
 import { NOTEBOOK_SAVED_OBJECT } from '../../../common/types/observability_saved_object_attributes';
 import {
   createParagraphs,
+  createBatchParagraphs,
   deleteParagraphs,
   deleteParagraphsByIds,
   updateFetchParagraph,
@@ -197,6 +198,45 @@ export function registerParaRoute(router: IRouter) {
         return response.ok({
           body: deleteResponse,
         });
+      } catch (error) {
+        return response.custom({
+          statusCode: error.statusCode || 500,
+          body: error.message,
+        });
+      }
+    }
+  );
+  router.post(
+    {
+      path: `${NOTEBOOKS_API_PREFIX}/savedNotebook/paragraphs/batch`,
+      validate: {
+        body: schema.object({
+          noteId: schema.string(),
+          startIndex: schema.number(),
+          paragraphs: schema.arrayOf(
+            schema.object({
+              input: paragraphInputValidation,
+              dataSourceMDSId: schema.maybe(schema.string()),
+              aiGenerated: schema.maybe(schema.boolean()),
+            })
+          ),
+          runAfterCreation: schema.maybe(schema.boolean()),
+        }),
+      },
+    },
+    async (
+      context,
+      request,
+      response
+    ): Promise<IOpenSearchDashboardsResponse<any | ResponseError>> => {
+      try {
+        const batchResponse = await createBatchParagraphs(
+          request.body,
+          context.core.savedObjects.client,
+          context,
+          request
+        );
+        return response.ok({ body: batchResponse });
       } catch (error) {
         return response.custom({
           statusCode: error.statusCode || 500,
